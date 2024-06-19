@@ -1,0 +1,87 @@
+from telethon import TelegramClient, events, Button
+import requests
+from bs4 import BeautifulSoup
+
+# تعيين معرف التطبيق وكلمة التأكيد الخاصة بتليجرام
+api_id = '25981860'  # استبدل YOUR_API_ID بمعرف التطبيق الخاص بك
+api_hash = '5ea7d7c41ba678cdbb62e9268473e261'  # استبدل YOUR_API_HASH بكلمة التأكيد الخاصة بتليجرام
+bot_token = '7278419404:AAHR1OPsyNxuox1silw-7_T_V8iB2ycHQbs'  # استبدل YOUR_BOT_TOKEN بتوكن البوت الذي حصلت عليه من BotFather
+
+# إنشاء عميل تليجرام
+client = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
+
+# دالة رئيسية لتشغيل البوت
+async def main():
+    print("Bot is running...")
+
+# دالة لجلب الأرقام الوهمية من موقع معين
+def get_numbers_by_country(country):
+    url = f'https://www.receive-sms-online.info/{country}'
+    response = requests.get(url)
+    numbers = []
+    
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        for tag in soup.find_all('span', {'class': 'number'}):
+            numbers.append(tag.text.strip())
+    
+    return numbers
+
+# دالة لجلب الرسائل الواردة للرقم الوهمي
+def get_messages_for_number(number):
+    url = f'https://www.receive-sms-online.info/number/{number}'
+    response = requests.get(url)
+    messages = []
+    
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        for row in soup.find_all('tr')[1:]:  # Assuming first row is header
+            cols = row.find_all('td')
+            if cols:
+                messages.append({
+                    'time': cols[0].text.strip(),
+                    'from': cols[1].text.strip(),
+                    'message': cols[2].text.strip(),
+                })
+    
+    return messages
+
+# إضافة منشئ الأوامر للبوت
+@client.on(events.NewMessage(pattern='/start'))
+async def start(event):
+    buttons = [
+        [Button.inline('United States', b'us'), Button.inline('United Kingdom', b'uk')],
+        [Button.inline('Canada', b'ca'), Button.inline('Germany', b'de')],
+        # أضف المزيد من الأزرار حسب الحاجة
+    ]
+    await event.reply('اختر الدولة:', buttons=buttons)
+
+    # تجنب استخدام events.CallbackQuery مرتين
+    @client.on(events.CallbackQuery)
+    async def callback(event):
+        country = event.data.decode('utf-8')
+        numbers = get_numbers_by_country(country)
+        
+        if numbers:
+            buttons = [[Button.inline(number, number.encode('utf-8'))] for number in numbers]
+            await event.edit(f'اختر الرقم من {country}:', buttons=buttons)
+        else:
+            await event.edit('لا توجد أرقام متاحة حالياً.')
+
+        # استجابة للاختيار النهائي للرقم الوهمي
+        @client.on(events.CallbackQuery)
+        async def number_selected(event):
+            number = event.data.decode('utf-8')
+            await event.edit(f'تم اختيار الرقم: {number}\nانتظر قليلاً لجلب الرسائل...')
+            
+            messages = get_messages_for_number(number)
+            
+            if messages:
+                message_texts = [f"{msg['time']} - {msg['from']}: {msg['message']}" for msg in messages]
+                await event.reply('\n'.join(message_texts))
+            else:
+                await event.reply('لا توجد رسائل لهذا الرقم حالياً.')
+
+# تشغيل البوت
+with client:
+    client.loop.run_until_complete(main())
